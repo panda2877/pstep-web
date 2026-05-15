@@ -1,0 +1,125 @@
+# 🚀 一键发布工作流
+#
+# 触发方式: GitHub UI → Actions → "🚀 一键发布" → Run workflow
+# 效果: 给 4 个仓库打 tag → 构建镜像 → 部署到服务器
+#
+# 前置条件:
+#   1. 在 GitHub 设置好 GH_PAT (Personal Access Token) → Secrets
+#   2. 在 GitHub 设置好 SERVER_SSH_KEY → Secrets
+#   3. 服务器上已有 docker-compose.yml
+
+name: 🚀 一键发布
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '版本号 (如 1.0.0)'
+        required: true
+        type: string
+
+env:
+  REGISTRY: ghcr.io
+  ORG: panda2877  # ← 改成你的 GitHub 组织名
+
+jobs:
+  release:
+    name: 发布 v${{ github.event.inputs.version }}
+    runs-on: ubuntu-latest
+
+    steps:
+      # ============================================================
+      # 1. 给所有仓库打 tag
+      # ============================================================
+      - name: 🏷️ Tag all repos
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          VERSION="v${{ github.event.inputs.version }}"
+          for repo in pi plan-solve-core plan-solve-gateway plan-solve-app; do
+            echo "Tagging $repo with $VERSION..."
+            gh api repos/${{ env.ORG }}/$repo/git/refs \
+              -f ref=refs/tags/$VERSION \
+              -f sha=$(gh api repos/${{ env.ORG }}/$repo/git/refs/heads/main --jq .object.sha)
+            echo "✅ $repo tagged $VERSION"
+          done
+
+      # ============================================================
+      # 2. 等待 pi fork 的 CI 完成（构建 npm 包）
+      # ============================================================
+      - name: ⏳ Wait for pi build
+        run: |
+          echo "等待 pi monorepo 构建 npm 包..."
+          sleep 120  # 约 2 分钟，可根据实际调整
+
+      # ============================================================
+      # 3. 等待 plan-solve-core 的 CI 完成（发布 npm 包）
+      # ============================================================
+      - name: ⏳ Wait for core build
+        run: |
+          echo "等待 plan-solve-core 发布 npm 包..."
+          sleep 60
+
+      # ============================================================
+      # 4. 构建 plan-solve-app 镜像
+      # ============================================================
+      - name: 🔨 Checkout plan-solve-app
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.ORG }}/plan-solve-app
+          token: ${{ secrets.GH_PAT }}
+
+      - name: 🔨 Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🔨 Build & push app image
+        run: |
+          TAG="${{ env.REGISTRY }}/${{ env.ORG }}/plan-solve-app:v${{ github.event.inputs.version }}"
+          docker build -t $TAG -t ${{ env.REGISTRY }}/${{ env.ORG }}/plan-solve-app:latest .
+          docker push $TAG
+          docker push ${{ env.REGISTRY }}/${{ env.ORG }}/plan-solve-app:latest
+          echo "✅ app 镜像已推送: $TAG"
+
+      # ============================================================
+      # 5. 构建 plan-solve-gateway 镜像
+      # ============================================================
+      - name: 🔨 Checkout plan-solve-gateway
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.ORG }}/plan-solve-gateway
+          token: ${{ secrets.GH_PAT }}
+
+      - name: 🔨 Build & push gateway image
+        run: |
+          TAG="${{ env.REGISTRY }}/${{ env.ORG }}/plan-solve-gateway:v${{ github.event.inputs.version }}"
+          docker build -t $TAG -t ${{ env.REGISTRY }}/${{ env.ORG }}/plan-solve-gateway:latest .
+          docker push $TAG
+          docker push ${{ env.REGISTRY }}/${{ env.ORG }}/plan-solve-gateway:latest
+          echo "✅ gateway 镜像已推送: $TAG"
+
+      # ============================================================
+      # 6. 部署到服务器
+      # ============================================================
+      - name: 🚀 Deploy to server
+        env:
+          SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+          SERVER_IP: 43.173.101.44
+        run: |
+          echo "部署到 $SERVER_IP ..."
+          mkdir -p ~/.ssh
+          echo "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no root@$SERVER_IP '
+            echo "拉取最新镜像..."
+            cd /root
+            docker compose pull
+            echo "重启服务..."
+            docker compose up -d
+            echo "检查状态..."
+            docker compose ps
+          '
+          echo "✅ 部署完成!"

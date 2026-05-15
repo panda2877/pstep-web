@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  gateway:
+    image: ghcr.io/panda2877/plan-solve-gateway:latest
+    ports:
+      - '3001:3001'
+    restart: unless-stopped
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+
+  app:
+    image: ghcr.io/panda2877/plan-solve-app:latest
+    ports:
+      - '5173:5173'
+    environment:
+      - GATEWAY_URL=http://gateway:3001
+    depends_on:
+      - gateway
+    restart: unless-stopped
