@@ -1,14 +1,17 @@
-# 🚀 一键发布工作流
+# 🚀 一键构建 + 部署
 #
-# 触发方式: GitHub UI → Actions → "🚀 一键发布" → Run workflow
-# 效果: 给 4 个仓库打 tag → 构建镜像 → 部署到服务器
+# 触发方式: GitHub UI → Actions → "🚀 一键构建 + 部署" → Run workflow
+# 效果: 构建 pstep-gateway + pstep-web → SCP 到服务器 → 重启服务
 #
 # 前置条件:
-#   1. 在 GitHub 设置好 GH_PAT (Personal Access Token) → Secrets
-#   2. 在 GitHub 设置好 SERVER_SSH_KEY → Secrets
-#   3. 服务器上已有 docker-compose.yml
+#   1. 在 GitHub 设置 GH_PAT (Personal Access Token) → Secrets
+#   2. 在 GitHub 设置 SERVER_SSH_KEY → Secrets
+#
+# 架构:
+#   pi 的 npm 包直接从 npm registry 安装（@earendil-works/pi-*）
+#   pstep-engine 目前空壳，暂不加入 CI
 
-name: 🚀 一键发布
+name: 🚀 一键构建 + 部署
 
 on:
   workflow_dispatch:
@@ -18,108 +21,95 @@ on:
         required: true
         type: string
 
-env:
-  REGISTRY: ghcr.io
-  ORG: panda2877  # ← 改成你的 GitHub 组织名
-
 jobs:
-  release:
-    name: 发布 v${{ github.event.inputs.version }}
+  build-and-deploy:
+    name: 构建并部署 v\${{ github.event.inputs.version }}
     runs-on: ubuntu-latest
 
     steps:
       # ============================================================
-      # 1. 给所有仓库打 tag
-      # ============================================================
-      - name: 🏷️ Tag all repos
-        env:
-          GH_TOKEN: ${{ secrets.GH_PAT }}
-        run: |
-          VERSION="v${{ github.event.inputs.version }}"
-          for repo in pi pstep-engine pstep-gateway pstep-web; do
-            echo "Tagging $repo with $VERSION..."
-            gh api repos/${{ env.ORG }}/$repo/git/refs \
-              -f ref=refs/tags/$VERSION \
-              -f sha=$(gh api repos/${{ env.ORG }}/$repo/git/refs/heads/main --jq .object.sha)
-            echo "✅ $repo tagged $VERSION"
-          done
-
-      # ============================================================
-      # 2. 等待 pi fork 的 CI 完成（构建 npm 包）
-      # ============================================================
-      - name: ⏳ Wait for pi build
-        run: |
-          echo "等待 pi monorepo 构建 npm 包..."
-          sleep 120  # 约 2 分钟，可根据实际调整
-
-      # ============================================================
-      # 3. 等待 pstep-engine 的 CI 完成（发布 npm 包）
-      # ============================================================
-      - name: ⏳ Wait for core build
-        run: |
-          echo "等待 pstep-engine 发布 npm 包..."
-          sleep 60
-
-      # ============================================================
-      # 4. 构建 pstep-web 镜像
+      # 1. Clone 仓库
       # ============================================================
       - name: 🔨 Checkout pstep-web
         uses: actions/checkout@v4
-        with:
-          repository: ${{ env.ORG }}/pstep-web
-          token: ${{ secrets.GH_PAT }}
 
-      - name: 🔨 Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: 🔨 Build & push app image
-        run: |
-          TAG="${{ env.REGISTRY }}/${{ env.ORG }}/pstep-web:v${{ github.event.inputs.version }}"
-          docker build -t $TAG -t ${{ env.REGISTRY }}/${{ env.ORG }}/pstep-web:latest .
-          docker push $TAG
-          docker push ${{ env.REGISTRY }}/${{ env.ORG }}/pstep-web:latest
-          echo "✅ app 镜像已推送: $TAG"
-
-      # ============================================================
-      # 5. 构建 pstep-gateway 镜像
-      # ============================================================
       - name: 🔨 Checkout pstep-gateway
         uses: actions/checkout@v4
         with:
-          repository: ${{ env.ORG }}/pstep-gateway
-          token: ${{ secrets.GH_PAT }}
-
-      - name: 🔨 Build & push gateway image
-        run: |
-          TAG="${{ env.REGISTRY }}/${{ env.ORG }}/pstep-gateway:v${{ github.event.inputs.version }}"
-          docker build -t $TAG -t ${{ env.REGISTRY }}/${{ env.ORG }}/pstep-gateway:latest .
-          docker push $TAG
-          docker push ${{ env.REGISTRY }}/${{ env.ORG }}/pstep-gateway:latest
-          echo "✅ gateway 镜像已推送: $TAG"
+          repository: panda2877/pstep-gateway
+          token: \${{ secrets.GH_PAT }}
+          path: pstep-gateway
 
       # ============================================================
-      # 6. 部署到服务器
+      # 2. 构建 pstep-gateway
+      # ============================================================
+      - name: 🏗️ Build pstep-gateway
+        run: |
+          cd pstep-gateway
+          npm install
+          npm run build
+          echo "✅ gateway 构建完成"
+          echo "   dist: \$(du -sh dist | cut -f1)"
+          echo "   node_modules: \$(du -sh node_modules | cut -f1)"
+
+      # ============================================================
+      # 3. 构建 pstep-web
+      # ============================================================
+      - name: 🏗️ Build pstep-web
+        run: |
+          npm install
+          npm run build
+          echo "✅ web 构建完成"
+          echo "   dist: \$(du -sh dist | cut -f1)"
+
+      # ============================================================
+      # 4. 部署到服务器
       # ============================================================
       - name: 🚀 Deploy to server
         env:
-          SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
-          SERVER_IP: 43.173.101.44
+          SSH_KEY: \${{ secrets.SERVER_SSH_KEY }}
         run: |
-          echo "部署到 $SERVER_IP ..."
+          set -e
+
+          # ---- 4a. 配置 SSH ----
           mkdir -p ~/.ssh
-          echo "$SSH_KEY" > ~/.ssh/deploy_key
+          echo "\$SSH_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no root@$SERVER_IP '
-            echo "拉取最新镜像..."
-            cd /root
-            docker compose pull
-            echo "重启服务..."
-            docker compose up -d
-            echo "检查状态..."
-            docker compose ps
+          SSH_OPTS="-i ~/.ssh/deploy_key -o StrictHostKeyChecking=no"
+          DEST="root@43.173.101.44"
+
+          echo "🛑 停止服务..."
+          ssh \$SSH_OPTS \$DEST 'systemctl stop pstep-web pstep-gateway'
+
+          echo "📦 备份当前版本..."
+          TS=\$(date +%Y%m%d_%H%M%S)
+          ssh \$SSH_OPTS \$DEST "mkdir -p /opt/pstep/backups/\$TS &&             cp -r /opt/pstep/gateway /opt/pstep/backups/\$TS/ &&             cp -r /opt/pstep/web /opt/pstep/backups/\$TS/ &&             echo 'backup saved to /opt/pstep/backups/\$TS'"
+
+          echo "📤 部署 gateway (dist + node_modules)..."
+          ssh \$SSH_OPTS \$DEST 'rm -rf /opt/pstep/gateway/dist/* /opt/pstep/gateway/node_modules'
+          tar cz -C pstep-gateway dist node_modules |             ssh \$SSH_OPTS \$DEST 'tar xz -C /opt/pstep/gateway'
+
+          echo "📤 部署 web (dist)..."
+          ssh \$SSH_OPTS \$DEST 'rm -rf /opt/pstep/web/dist/*'
+          tar cz -C pstep-web dist |             ssh \$SSH_OPTS \$DEST 'tar xz -C /opt/pstep/web'
+
+          echo "🚀 启动服务..."
+          ssh \$SSH_OPTS \$DEST 'systemctl start pstep-gateway && sleep 3 && systemctl start pstep-web'
+
+          echo "🔍 健康检查..."
+          sleep 2
+          ssh \$SSH_OPTS \$DEST '
+            echo "=== Gateway Health ==="
+            curl -s http://localhost:3001/health
+            echo ""
+            echo "=== Gateway Status ==="
+            systemctl is-active pstep-gateway
+            echo "=== Web Status ==="
+            systemctl is-active pstep-web
+            echo "=== Web HTTP ==="
+            curl -s -o /dev/null -w "HTTP %{http_code}" http://localhost:5173
+            echo ""
           '
+
           echo "✅ 部署完成!"
+
