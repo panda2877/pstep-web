@@ -36,7 +36,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GH_PAT }}
         run: |
           VERSION="v${{ github.event.inputs.version }}"
-          for repo in pi plan-solve-core plan-solve-gateway plan-solve-app; do
+          for repo in pi pstep-engine pstep-gateway pstep-web; do
             echo "Tagging $repo with $VERSION..."
             gh api repos/${{ env.ORG }}/$repo/git/refs \
               -f ref=refs/tags/$VERSION \
@@ -53,20 +53,20 @@ jobs:
           sleep 120  # 约 2 分钟，可根据实际调整
 
       # ============================================================
-      # 3. 等待 plan-solve-core 的 CI 完成（发布 npm 包）
+      # 3. 等待 pstep-engine 的 CI 完成（发布 npm 包）
       # ============================================================
       - name: ⏳ Wait for core build
         run: |
-          echo "等待 plan-solve-core 发布 npm 包..."
+          echo "等待 pstep-engine 发布 npm 包..."
           sleep 60
 
       # ============================================================
-      # 4. 构建 plan-solve-app 镜像
+      # 4. 构建 pstep-web 镜像
       # ============================================================
-      - name: 🔨 Checkout plan-solve-app
+      - name: 🔨 Checkout pstep-web
         uses: actions/checkout@v4
         with:
-          repository: ${{ env.ORG }}/plan-solve-app
+          repository: ${{ env.ORG }}/pstep-web
           token: ${{ secrets.GH_PAT }}
 
       - name: 🔨 Log in to GitHub Container Registry
@@ -78,27 +78,27 @@ jobs:
 
       - name: 🔨 Build & push app image
         run: |
-          TAG="${{ env.REGISTRY }}/${{ env.ORG }}/plan-solve-app:v${{ github.event.inputs.version }}"
-          docker build -t $TAG -t ${{ env.REGISTRY }}/${{ env.ORG }}/plan-solve-app:latest .
+          TAG="${{ env.REGISTRY }}/${{ env.ORG }}/pstep-web:v${{ github.event.inputs.version }}"
+          docker build -t $TAG -t ${{ env.REGISTRY }}/${{ env.ORG }}/pstep-web:latest .
           docker push $TAG
-          docker push ${{ env.REGISTRY }}/${{ env.ORG }}/plan-solve-app:latest
+          docker push ${{ env.REGISTRY }}/${{ env.ORG }}/pstep-web:latest
           echo "✅ app 镜像已推送: $TAG"
 
       # ============================================================
-      # 5. 构建 plan-solve-gateway 镜像
+      # 5. 构建 pstep-gateway 镜像
       # ============================================================
-      - name: 🔨 Checkout plan-solve-gateway
+      - name: 🔨 Checkout pstep-gateway
         uses: actions/checkout@v4
         with:
-          repository: ${{ env.ORG }}/plan-solve-gateway
+          repository: ${{ env.ORG }}/pstep-gateway
           token: ${{ secrets.GH_PAT }}
 
       - name: 🔨 Build & push gateway image
         run: |
-          TAG="${{ env.REGISTRY }}/${{ env.ORG }}/plan-solve-gateway:v${{ github.event.inputs.version }}"
-          docker build -t $TAG -t ${{ env.REGISTRY }}/${{ env.ORG }}/plan-solve-gateway:latest .
+          TAG="${{ env.REGISTRY }}/${{ env.ORG }}/pstep-gateway:v${{ github.event.inputs.version }}"
+          docker build -t $TAG -t ${{ env.REGISTRY }}/${{ env.ORG }}/pstep-gateway:latest .
           docker push $TAG
-          docker push ${{ env.REGISTRY }}/${{ env.ORG }}/plan-solve-gateway:latest
+          docker push ${{ env.REGISTRY }}/${{ env.ORG }}/pstep-gateway:latest
           echo "✅ gateway 镜像已推送: $TAG"
 
       # ============================================================
