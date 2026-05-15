@@ -6,7 +6,16 @@ export default defineConfig({
     port: 5173,
   },
   build: {
-    target: 'es2022',
+    target: 'es2020',
     outDir: 'dist',
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'lit-core': ['lit'],
+          'pi-agent': ['@earendil-works/pi-agent-core', '@earendil-works/pi-ai'],
+          'pi-web-ui': ['@earendil-works/pi-web-ui'],
+        },
+      },
+    },
   },
 });
