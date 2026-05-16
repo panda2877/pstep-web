@@ -105,12 +105,17 @@ setAppStorage(storage);
 // 注册默认网关提供商
 // ============================================================
 
-const gatewayUrl = import.meta.env.VITE_GATEWAY_URL || "http://localhost:3001";
+// 使用相对路径，通过代理层转发到 Gateway
+const gatewayUrl = import.meta.env.VITE_GATEWAY_URL || "/gateway";
 let gatewayModels: any[] = [];
 
 async function registerDefaultProvider() {
-  // 从 Gateway 获取模型配置（Gateway 统一管理所有模型元数据）
-  const res = await fetch(`${gatewayUrl}/api/models`);
+  // 从 Gateway 获取模型配置（通过代理层，需要携带 API Key）
+  const res = await fetch(`${gatewayUrl}/api/models`, {
+    headers: {
+      'Authorization': 'Bearer pstep-gateway-key',
+    },
+  });
   const meta = await res.json();
   gatewayModels = meta.models || [];
 

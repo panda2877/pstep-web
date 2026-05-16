@@ -4,6 +4,14 @@ export default defineConfig({
   server: {
     host: '0.0.0.0',
     port: 5173,
+    // 开发环境代理 /gateway/* → http://localhost:3001/*
+    proxy: {
+      '/gateway': {
+        target: 'http://localhost:3001',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/gateway/, ''),
+      },
+    },
   },
   build: {
     target: 'es2020',
