@@ -101,9 +101,12 @@ sessions.setBackend(backend);
 const storage = new AppStorage(settings, providerKeys, sessions, customProviders, backend);
 setAppStorage(storage);
 
+// ============================================================
 // 注册默认网关提供商
+// ============================================================
+
 const gatewayUrl = import.meta.env.VITE_GATEWAY_URL || "http://localhost:3001";
-(async () => {
+async function registerDefaultProvider() {
   await customProviders.set({
     id: "pstep-gateway",
     name: "Pstep Gateway",
@@ -112,7 +115,7 @@ const gatewayUrl = import.meta.env.VITE_GATEWAY_URL || "http://localhost:3001";
     models: [{ id: "mimo-v2.5", name: "MiMo v2.5" }],
     apiKey: "pstep-gateway-key",
   });
-})();
+}
 
 // ============================================================
 // Agent & Session State
@@ -339,6 +342,8 @@ async function initApp() {
   if (!app) throw new Error("App container not found");
   render(html`<div style="width:100%;height:100vh;display:flex;align-items:center;justify-content:center;"><div>Loading...</div></div>`, app);
   chatPanel = new ChatPanel();
+  // 先注册默认网关提供商，确保 agent 创建前 provider 已就绪
+  await registerDefaultProvider();
   const urlParams = new URLSearchParams(window.location.search);
   const sessionIdFromUrl = urlParams.get("session");
   if (sessionIdFromUrl) {
