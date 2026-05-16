@@ -3,7 +3,7 @@
 // ============================================================================
 
 import { Agent, type AgentMessage } from "@earendil-works/pi-agent-core";
-import { getModel, type TextContent } from "@earendil-works/pi-ai";
+import { type TextContent } from "@earendil-works/pi-ai";
 import {
   ApiKeyPromptDialog,
   AppStorage,
@@ -106,17 +106,28 @@ setAppStorage(storage);
 // ============================================================
 
 const gatewayUrl = import.meta.env.VITE_GATEWAY_URL || "http://localhost:3001";
+let gatewayModels: any[] = [];
+
 async function registerDefaultProvider() {
+  // 从 Gateway 获取模型配置（Gateway 统一管理所有模型元数据）
+  const res = await fetch(`${gatewayUrl}/api/models`);
+  const meta = await res.json();
+  gatewayModels = meta.models || [];
+
   await customProviders.set({
     id: "pstep-gateway",
     name: "Pstep Gateway",
     type: "openai-completions",
     baseUrl: gatewayUrl,
-    models: [{ id: "mimo-v2.5", name: "MiMo v2.5" }],
-    apiKey: "pstep-gateway-key",
+    models: gatewayModels.map((m: any) => ({ id: m.id, name: m.name })),
+    apiKey: meta.apiKey,
   });
-  // Refresh the in-memory cache so Agent can find it immediately
   await customProviders.getAll();
+
+  // 同步 API key 到 providerKeys store，避免 "API Key Required" 弹窗
+  await providerKeys.set("pstep-gateway", meta.apiKey);
+
+  return meta;
 }
 
 // ============================================================
@@ -226,10 +237,14 @@ const updateUrl = (sessionId: string) => {
 
 const createAgent = async (initialState?: any) => {
   if (agentUnsubscribe) agentUnsubscribe();
+  // 如果 initialState 中有有效 model 则使用，否则用 Gateway 的第一个模型
+  const modelToUse = (initialState?.model?.id ? initialState.model : null)
+    || gatewayModels[0]
+    || { id: "mimo-v2.5", api: "openai-completions", provider: "pstep-gateway", baseUrl: gatewayUrl, reasoning: false, input: ["text"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 128000, maxTokens: 4096 };
   agent = new Agent({
-    initialState: initialState || {
+    initialState: initialState ? { ...initialState, model: modelToUse } : {
       systemPrompt: PSTEP_SYSTEM_PROMPT,
-      model: getModel("pstep-gateway", "mimo-v2.5"),
+      model: modelToUse,
       thinkingLevel: "off",
       messages: [],
       tools: [],
@@ -344,7 +359,7 @@ async function initApp() {
   if (!app) throw new Error("App container not found");
   render(html`<div style="width:100%;height:100vh;display:flex;align-items:center;justify-content:center;"><div>Loading...</div></div>`, app);
   chatPanel = new ChatPanel();
-  // 先注册默认网关提供商，确保 agent 创建前 provider 已就绪
+  // 从 Gateway 获取模型配置，确保 agent 创建前所有元数据已就绪
   await registerDefaultProvider();
   const urlParams = new URLSearchParams(window.location.search);
   const sessionIdFromUrl = urlParams.get("session");

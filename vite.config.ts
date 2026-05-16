@@ -9,6 +9,7 @@ export default defineConfig({
     target: 'es2020',
     outDir: 'dist',
     rollupOptions: {
+      external: ['@mistralai/mistralai'],
       output: {
         manualChunks: {
           'lit-core': ['lit'],
@@ -17,5 +18,8 @@ export default defineConfig({
         },
       },
     },
+  },
+  optimizeDeps: {
+    exclude: ['@mistralai/mistralai'],
   },
 });
