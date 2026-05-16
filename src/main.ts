@@ -103,14 +103,16 @@ setAppStorage(storage);
 
 // 注册默认网关提供商
 const gatewayUrl = import.meta.env.VITE_GATEWAY_URL || "http://localhost:3001";
-customProviders.add({
-  id: "pstep-gateway",
-  name: "Pstep Gateway",
-  type: "openai-completions",
-  baseUrl: gatewayUrl,
-  models: [{ id: "mimo-v2.5", name: "MiMo v2.5" }],
-  apiKey: "pstep-gateway-key",
-});
+(async () => {
+  await customProviders.set({
+    id: "pstep-gateway",
+    name: "Pstep Gateway",
+    type: "openai-completions",
+    baseUrl: gatewayUrl,
+    models: [{ id: "mimo-v2.5", name: "MiMo v2.5" }],
+    apiKey: "pstep-gateway-key",
+  });
+})();
 
 // ============================================================
 // Agent & Session State
