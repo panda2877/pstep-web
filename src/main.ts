@@ -115,6 +115,8 @@ async function registerDefaultProvider() {
     models: [{ id: "mimo-v2.5", name: "MiMo v2.5" }],
     apiKey: "pstep-gateway-key",
   });
+  // Refresh the in-memory cache so Agent can find it immediately
+  await customProviders.getAll();
 }
 
 // ============================================================
