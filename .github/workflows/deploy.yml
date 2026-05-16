@@ -26,7 +26,6 @@ on:
       - '.github/workflows/deploy.yml'
       - '.env.production'
 
-env:
 
 jobs:
   deploy:
