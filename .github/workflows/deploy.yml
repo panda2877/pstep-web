@@ -41,6 +41,17 @@ jobs:
         with:
           node-version: '20'
 
+      - name: 🔐 NPM Authentication
+        run: |
+          if [ -z "${{ secrets.NPM_TOKEN }}" ]; then
+            echo "ERROR: NPM_TOKEN secret is not configured!"
+            echo "Please add NPM_TOKEN in GitHub repository secrets:"
+            echo "https://github.com/panda2877/pstep-web/settings/secrets/actions"
+            exit 1
+          fi
+          echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" > .npmrc
+          echo "NPM token configured for private packages"
+
       - name: 📦 Install dependencies
         run: |
           rm -rf node_modules
