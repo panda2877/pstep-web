@@ -70,6 +70,9 @@ jobs:
           ssh -o StrictHostKeyChecking=accept-new -i ~/.ssh/deploy_key agentuser@$SERVER_HOST "sudo rm -rf /opt/pstep/web/dist/* 2>/dev/null; sudo mkdir -p /opt/pstep/web"
           tar cz -C . dist package.json proxy-server.js | ssh -o StrictHostKeyChecking=accept-new -i ~/.ssh/deploy_key agentuser@$SERVER_HOST "sudo tar xz -C /opt/pstep/web"
 
+          echo 'Installing production dependencies on server...'
+          ssh -o StrictHostKeyChecking=accept-new -i ~/.ssh/deploy_key agentuser@$SERVER_HOST "cd /opt/pstep/web && sudo npm install --omit=dev --no-audit --no-fund 2>&1"
+
           echo 'Start web...'
           ssh -o StrictHostKeyChecking=accept-new -i ~/.ssh/deploy_key agentuser@$SERVER_HOST 'sudo systemctl start pstep-web'
 
