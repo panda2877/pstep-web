@@ -14,6 +14,7 @@ import path from 'path';
 const app = express();
 const PORT = 5173;
 const GATEWAY_URL = 'http://127.0.0.1:3001';
+const ENGINE_URL = 'http://127.0.0.1:4000';
 
 // ============================================================
 // 代理中间件 — /gateway/* → Gateway
@@ -36,6 +37,17 @@ const gatewayProxy = createProxyMiddleware({
 });
 
 app.use('/gateway', gatewayProxy);
+// Engine proxy
+const engineProxy = createProxyMiddleware({
+  target: ENGINE_URL,
+  changeOrigin: true,
+  onError: (err, req, res) => {
+    console.error("[proxy] Engine 连接失败:", err.message);
+    res.status(502).json({ error: "Engine 连接失败", message: err.message });
+  },
+});
+
+app.use("/api", engineProxy);
 
 // ============================================================
 // 静态文件服务
@@ -62,5 +74,6 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log('╚══════════════════════════════════════╝');
   console.log(`✅ 前端服务: http://0.0.0.0:${PORT}`);
   console.log(`✅ 代理层: /gateway/* → http://127.0.0.1:3001`);
+  console.log(`✅ 代理层: /api/* → http://127.0.0.1:4000 (Engine)`);
   console.log(`🔒 API Key 校验: 已启用`);
 });

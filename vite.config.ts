@@ -4,12 +4,18 @@ export default defineConfig({
   server: {
     host: '0.0.0.0',
     port: 5173,
-    // 开发环境代理 /gateway/* → http://localhost:3001/*
+    // 开发环境代理
     proxy: {
+      // /gateway/* → Gateway (模型路由)
       '/gateway': {
         target: 'http://localhost:3001',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/gateway/, ''),
+      },
+      // /api/* → Engine (Agent 逻辑引擎，SSE 流)
+      '/api': {
+        target: 'http://localhost:4000',
+        changeOrigin: true,
       },
     },
   },
