@@ -1,15 +1,15 @@
 // ============================================================================
-// Pstep Web UI — 主入口（SSE 流模式）
-// 通过 SSEAgent 消费 Engine 的 Plan/Solve/Verify 循环输出
+// Pstep Web UI — 主入口
 // ============================================================================
 
-import { type AgentMessage } from "@earendil-works/pi-agent-core";
+import { Agent, type AgentMessage } from "@earendil-works/pi-agent-core";
 import { type TextContent } from "@earendil-works/pi-ai";
 import {
   ApiKeyPromptDialog,
   AppStorage,
   ChatPanel,
   CustomProvidersStore,
+  createJavaScriptReplTool,
   IndexedDBStorageBackend,
   ProviderKeysStore,
   SessionsStore,
@@ -26,7 +26,6 @@ import { html, render } from "lit";
 import { History, Plus, Settings, Lightbulb, ListChecks, CheckCircle2 } from "lucide";
 import { icon } from "@mariozechner/mini-lit";
 import { Button } from "@mariozechner/mini-lit/dist/Button.js";
-import { SSEAgent, type SSEMessage } from "./engine/sse-agent.js";
 import "./pstep.css";
 
 // ============================================================
@@ -36,24 +35,13 @@ import "./pstep.css";
 // Plan 消息渲染器
 registerMessageRenderer("plan", (message: any) => {
   const content = typeof message.content === "string" ? message.content : "";
-  const steps = message.steps ?? [];
   return html`
     <div class="pstep-block plan-block">
       <div class="pstep-header">
         <span class="pstep-icon">${icon(Lightbulb, "sm")}</span>
-        <span class="pstep-label">计划 (${steps.length} 步)</span>
+        <span class="pstep-label">计划</span>
       </div>
       <div class="pstep-content">${content}</div>
-      ${steps.length > 0 ? html`
-        <div class="pstep-steps">
-          ${steps.map((s: any, i: number) => html`
-            <div class="pstep-step ${s.status === "completed" ? "completed" : s.status === "in_progress" ? "active" : ""}">
-              <span class="step-num">${i + 1}</span>
-              <span class="step-title">${s.title}</span>
-              ${s.description ? html`<span class="step-desc">${s.description}</span>` : ""}
-            </div>
-          `)}
-        </div>` : ""}
     </div>`;
 });
 
@@ -64,7 +52,7 @@ registerMessageRenderer("solve", (message: any) => {
     <div class="pstep-block solve-block">
       <div class="pstep-header">
         <span class="pstep-icon">${icon(ListChecks, "sm")}</span>
-        <span class="pstep-label">执行 ${message.stepNumber ? `(第 ${message.stepNumber} 步)` : ""}</span>
+        <span class="pstep-label">执行</span>
       </div>
       <div class="pstep-content">${content}</div>
     </div>`;
@@ -73,40 +61,14 @@ registerMessageRenderer("solve", (message: any) => {
 // Verify 消息渲染器
 registerMessageRenderer("verify", (message: any) => {
   const content = typeof message.content === "string" ? message.content : "";
-  const status = message.status ?? (content.includes("通过") || content.includes("正确") || content.includes("完成") ? "pass" : "fail");
-  const isPass = status === "pass";
+  const verified = content.includes("通过") || content.includes("正确") || content.includes("完成");
   return html`
-    <div class="pstep-block ${isPass ? "verify-pass" : "verify-fail"}">
+    <div class="pstep-block ${verified ? "verify-pass" : "verify-fail"}">
       <div class="pstep-header">
         <span class="pstep-icon">${icon(CheckCircle2, "sm")}</span>
-        <span class="pstep-label">验证 ${isPass ? "✅" : "❌"}</span>
+        <span class="pstep-label">验证</span>
       </div>
       <div class="pstep-content">${content}</div>
-      ${message.suggestions?.length > 0 ? html`
-        <div class="pstep-suggestions">
-          <div class="suggestion-label">建议：</div>
-          ${message.suggestions.map((s: string) => html`<div class="suggestion-item">- ${s}</div>`)}
-        </div>` : ""}
-    </div>`;
-});
-
-// 流式消息渲染器
-registerMessageRenderer("streaming", (message: any) => {
-  const content = typeof message.content === "string" ? message.content : "";
-  const isTool = message.isToolCall;
-  if (isTool) {
-    return html`
-      <div class="pstep-block tool-block">
-        <div class="pstep-header">
-          <span class="pstep-icon">🔧</span>
-          <span class="pstep-label">工具: ${message.toolName ?? "未知"}</span>
-        </div>
-        <div class="pstep-content">${content}</div>
-      </div>`;
-  }
-  return html`
-    <div class="pstep-block streaming-block">
-      <div class="pstep-content streaming-content">${content}</div>
     </div>`;
 });
 
@@ -140,15 +102,19 @@ const storage = new AppStorage(settings, providerKeys, sessions, customProviders
 setAppStorage(storage);
 
 // ============================================================
-// 注册默认网关提供商（仅用于模型选择，消息走 Engine SSE）
+// 注册默认网关提供商
 // ============================================================
 
+// 使用相对路径，通过代理层转发到 Gateway
 const gatewayUrl = import.meta.env.VITE_GATEWAY_URL || "/gateway";
 let gatewayModels: any[] = [];
 
 async function registerDefaultProvider() {
+  // 从 Gateway 获取模型配置（通过代理层，需要携带 API Key）
   const res = await fetch(`${gatewayUrl}/api/models`, {
-    headers: { Authorization: "Bearer pstep-gateway-key" },
+    headers: {
+      'Authorization': 'Bearer pstep-gateway-key',
+    },
   });
   const meta = await res.json();
   gatewayModels = meta.models || [];
@@ -162,30 +128,68 @@ async function registerDefaultProvider() {
     apiKey: meta.apiKey,
   });
   await customProviders.getAll();
+
+  // 同步 API key 到 providerKeys store，避免 "API Key Required" 弹窗
   await providerKeys.set("pstep-gateway", meta.apiKey);
+
   return meta;
 }
 
 // ============================================================
-// SSEAgent + Session State
+// Agent & Session State
 // ============================================================
 
 let currentSessionId: string | undefined;
 let currentTitle = "";
 let isEditingTitle = false;
-let sseAgent: SSEAgent;
+let agent: Agent;
 let chatPanel: ChatPanel;
 let agentUnsubscribe: (() => void) | undefined;
 
-const generateTitle = (messages: SSEMessage[]): string => {
+const PSTEP_SYSTEM_PROMPT = `你是 Pstep (Panda Step) 多步推理助手。你的核心工作方式是：
+
+## 核心原则
+将复杂任务拆解为 Plan → Solve → Verify 循环。
+
+## 工作流程
+
+### 1. 规划 (Plan)
+当收到复杂任务时，先制定计划：
+- 列出需要完成的步骤
+- 每个步骤要明确、可执行
+- 步骤之间要有逻辑顺序
+
+使用 **📋 计划** 标记开头。
+
+### 2. 执行 (Solve)
+按计划逐步执行：
+- 一次只做一个步骤
+- 完成一个再继续下一个
+- 使用工具辅助执行
+
+使用 **🔧 执行** 标记开头。
+
+### 3. 验证 (Verify)
+每完成一个步骤后验证结果：
+- 检查输出是否符合预期
+- 如果发现问题，回到 Solve 修正
+- 如果通过，进入下一步
+
+使用 **✅ 验证** 标记开头。
+
+### 4. 循环
+重复 Solve → Verify 直到所有步骤完成。
+全部完成后给出最终总结。`;
+
+const generateTitle = (messages: AgentMessage[]): string => {
   const firstUserMsg = messages.find((m) => m.role === "user");
   if (!firstUserMsg) return "";
   let text = "";
-  const content = (firstUserMsg as any).content;
+  const content = firstUserMsg.content;
   if (typeof content === "string") {
     text = content;
-  } else if (Array.isArray(content)) {
-    const textBlocks = content.filter((c: any): c is TextContent => c.type === "text");
+  } else {
+    const textBlocks = content.filter((c): c is TextContent => c.type === "text");
     text = textBlocks.map((c) => c.text || "").join(" ");
   }
   text = text.trim();
@@ -195,21 +199,21 @@ const generateTitle = (messages: SSEMessage[]): string => {
   return text.length <= 50 ? text : `${text.substring(0, 47)}...`;
 };
 
-const shouldSaveSession = (messages: SSEMessage[]): boolean => {
+const shouldSaveSession = (messages: AgentMessage[]): boolean => {
   return messages.some((m) => m.role === "user") && messages.some((m) => m.role === "assistant");
 };
 
 const saveSession = async () => {
-  if (!storage.sessions || !currentSessionId || !sseAgent || !currentTitle) return;
-  const messages = sseAgent.state.messages;
-  if (!shouldSaveSession(messages)) return;
+  if (!storage.sessions || !currentSessionId || !agent || !currentTitle) return;
+  const state = agent.state;
+  if (!shouldSaveSession(state.messages)) return;
   try {
     const sessionData = {
       id: currentSessionId,
       title: currentTitle,
-      model: sseAgent.state.model ?? { id: "engine" },
-      thinkingLevel: sseAgent.state.thinkingLevel || "off",
-      messages,
+      model: state.model!,
+      thinkingLevel: state.thinkingLevel,
+      messages: state.messages,
       createdAt: new Date().toISOString(),
       lastModified: new Date().toISOString(),
     };
@@ -218,11 +222,11 @@ const saveSession = async () => {
       title: currentTitle,
       createdAt: sessionData.createdAt,
       lastModified: sessionData.lastModified,
-      messageCount: messages.length,
+      messageCount: state.messages.length,
       usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
-      modelId: null,
-      thinkingLevel: "off",
-      preview: generateTitle(messages),
+      modelId: state.model?.id || null,
+      thinkingLevel: state.thinkingLevel,
+      preview: generateTitle(state.messages),
     };
     await storage.sessions.save(sessionData, metadata);
   } catch (err) {
@@ -236,43 +240,39 @@ const updateUrl = (sessionId: string) => {
   window.history.replaceState({}, "", url);
 };
 
-const createSSEAgent = async (initialState?: { messages?: SSEMessage[] }) => {
+const createAgent = async (initialState?: any) => {
   if (agentUnsubscribe) agentUnsubscribe();
-  if (sseAgent) sseAgent.clear();
-
-  const defaultModel = gatewayModels[0] || { id: "sensenova" };
-
-  sseAgent = new SSEAgent({
-    engineUrl: "/api",
-    model: defaultModel,
-    systemPrompt: "你是一位 Pstep 多步推理助手，采用 Plan/Solve/Verify 范式工作。",
-    onSessionCreated: (newSessionId) => {
-      if (!currentSessionId) {
-        currentSessionId = newSessionId;
-        updateUrl(newSessionId);
-      }
+  // 如果 initialState 中有有效 model 则使用，否则用 Gateway 的第一个模型
+  const modelToUse = (initialState?.model?.id ? initialState.model : null)
+    || gatewayModels[0]
+    || { id: "mimo-v2.5", api: "openai-completions", provider: "pstep-gateway", baseUrl: gatewayUrl, reasoning: false, input: ["text"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 128000, maxTokens: 4096 };
+  agent = new Agent({
+    initialState: initialState ? { ...initialState, model: modelToUse } : {
+      systemPrompt: PSTEP_SYSTEM_PROMPT,
+      model: modelToUse,
+      thinkingLevel: "off",
+      messages: [],
+      tools: [],
     },
   });
-
-  // 恢复 initialState 中的消息
-  if (initialState?.messages?.length) {
-    sseAgent.state.messages = [...initialState.messages];
-  }
-
-  agentUnsubscribe = sseAgent.subscribe((event: any) => {
+  agentUnsubscribe = agent.subscribe((event: any) => {
     if (event.type === "state-update") {
-      const messages = sseAgent.state.messages;
+      const messages = event.state.messages;
       if (!currentTitle && shouldSaveSession(messages)) currentTitle = generateTitle(messages);
+      if (!currentSessionId && shouldSaveSession(messages)) {
+        currentSessionId = crypto.randomUUID();
+        updateUrl(currentSessionId);
+      }
       if (currentSessionId) saveSession();
       renderApp();
     }
   });
-
-  await chatPanel.setAgent(sseAgent as any, {
+  await chatPanel.setAgent(agent, {
     onApiKeyRequired: async (provider: string) => ApiKeyPromptDialog.prompt(provider),
-    toolsFactory: () => {
-      // 工具由 Engine 服务端管理，本地不创建工具
-      return [];
+    toolsFactory: (_agent: any, _agentInterface: any, _artifactsPanel: any, runtimeProvidersFactory: any) => {
+      const replTool = createJavaScriptReplTool();
+      replTool.runtimeProvidersFactory = runtimeProvidersFactory;
+      return [replTool];
     },
   });
 };
@@ -284,9 +284,7 @@ const loadSession = async (sessionId: string): Promise<boolean> => {
   currentSessionId = sessionId;
   const metadata = await storage.sessions.getMetadata(sessionId);
   currentTitle = metadata?.title || "";
-  await createSSEAgent({
-    messages: (sessionData.messages || []) as SSEMessage[],
-  });
+  await createAgent({ model: sessionData.model, thinkingLevel: sessionData.thinkingLevel, messages: sessionData.messages, tools: [] });
   updateUrl(sessionId);
   renderApp();
   return true;
@@ -336,7 +334,7 @@ const renderApp = () => {
                   }} />`
               : html`<button style="padding:4px 8px;font-size:14px;cursor:pointer;background:none;border:none;color:var(--foreground);"
                   @click=${() => { isEditingTitle = true; renderApp(); requestAnimationFrame(() => {
-                    const inp = app?.querySelector(input[type=text]) as HTMLInputElement;
+                    const inp = app?.querySelector('input[type="text"]') as HTMLInputElement;
                     if (inp) { inp.focus(); inp.select(); }
                   });}}>${currentTitle}</button>`
             : html`<span style="font-size:16px;font-weight:600;display:flex;align-items:center;gap:6px;">
@@ -352,7 +350,7 @@ const renderApp = () => {
         </div>
       </div>
       <!-- Chat Panel -->
-      <div style="flex:1;min-height:0;overflow:hidden;">${chatPanel}</div>
+      ${chatPanel}
     </div>`;
   render(appHtml, app);
 };
@@ -366,6 +364,7 @@ async function initApp() {
   if (!app) throw new Error("App container not found");
   render(html`<div style="width:100%;height:100vh;display:flex;align-items:center;justify-content:center;"><div>Loading...</div></div>`, app);
   chatPanel = new ChatPanel();
+  // 从 Gateway 获取模型配置，确保 agent 创建前所有元数据已就绪
   await registerDefaultProvider();
   const urlParams = new URLSearchParams(window.location.search);
   const sessionIdFromUrl = urlParams.get("session");
@@ -373,9 +372,10 @@ async function initApp() {
     const loaded = await loadSession(sessionIdFromUrl);
     if (!loaded) { newSession(); return; }
   } else {
-    await createSSEAgent();
+    await createAgent();
   }
   renderApp();
 }
 
 initApp();
+// CI trigger:  + date
