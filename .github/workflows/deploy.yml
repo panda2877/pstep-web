@@ -41,33 +41,8 @@ jobs:
         with:
           node-version: '20'
 
-      - name: 🔐 NPM Authentication
-        run: |
-          if [ -z "${{ secrets.NPM_TOKEN }}" ]; then
-            echo "ERROR: NPM_TOKEN secret is not configured!"
-            echo "Please add NPM_TOKEN in GitHub repository secrets:"
-            echo "https://github.com/panda2877/pstep-web/settings/secrets/actions"
-            exit 1
-          fi
-          echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" > .npmrc
-          echo "NPM token configured for private packages"
-
       - name: 📦 Install dependencies
-        run: |
-          rm -rf node_modules
-          npm install
-
-      - name: ✅ Verify vite installed
-        run: |
-          echo "Checking vite installation..."
-          if [ -f "node_modules/.bin/vite" ]; then
-            echo "vite found at node_modules/.bin/vite"
-            ./node_modules/.bin/vite --version
-          else
-            echo "vite NOT found!"
-            ls -la node_modules/.bin/ 2>/dev/null || echo "node_modules/.bin does not exist"
-            exit 1
-          fi
+        run: npm install
 
       - name: 🏗️ Build
         run: npm run build
