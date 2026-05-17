@@ -31,8 +31,7 @@ jobs:
   deploy:
     name: Build & Deploy Web UI
     runs-on: ubuntu-latest
-    
-    # 禁用缓存避免旧缓存导致的问题
+
     steps:
       - name: 🔨 Checkout
         uses: actions/checkout@v6
@@ -41,22 +40,20 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: '20'
-          # 禁用缓存，强制重新安装
-          cache: false
 
       - name: 📦 Install dependencies
         run: |
-          rm -rf node_modules package-lock.json
+          rm -rf node_modules
           npm install
 
       - name: ✅ Verify vite installed
         run: |
           echo "Checking vite installation..."
           if [ -f "node_modules/.bin/vite" ]; then
-            echo "✓ vite found at node_modules/.bin/vite"
+            echo "vite found at node_modules/.bin/vite"
             ./node_modules/.bin/vite --version
           else
-            echo "✗ vite NOT found!"
+            echo "vite NOT found!"
             ls -la node_modules/.bin/ 2>/dev/null || echo "node_modules/.bin does not exist"
             exit 1
           fi
@@ -71,27 +68,26 @@ jobs:
         run: |
           set -e
 
-          # 配置 SSH
           mkdir -p ~/.ssh
           ssh-keyscan -H $SERVER_HOST >> ~/.ssh/known_hosts 2>/dev/null || echo '[WARN] ssh-keyscan failed'
           echo "$SSH_KEY_B64" | base64 -d > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
 
-          echo '🛑 停止 web 服务...'
+          echo 'Stopping web service...'
           ssh -o StrictHostKeyChecking=accept-new -i ~/.ssh/deploy_key agentuser@$SERVER_HOST 'sudo systemctl stop pstep-web || true'
 
-          echo '📦 备份...'
+          echo 'Backup...'
           TS=$(date +%Y%m%d_%H%M%S)
           ssh -o StrictHostKeyChecking=accept-new -i ~/.ssh/deploy_key agentuser@$SERVER_HOST "if [ -d /opt/pstep/web ]; then sudo mkdir -p /opt/pstep/backups/$TS && sudo cp -r /opt/pstep/web /opt/pstep/backups/$TS/; else echo 'skip backup'; fi"
 
-          echo '📤 部署 web...'
+          echo 'Deploy web...'
           ssh -o StrictHostKeyChecking=accept-new -i ~/.ssh/deploy_key agentuser@$SERVER_HOST "sudo rm -rf /opt/pstep/web/dist/* 2>/dev/null; sudo mkdir -p /opt/pstep/web"
           tar cz -C . dist package.json | ssh -o StrictHostKeyChecking=accept-new -i ~/.ssh/deploy_key agentuser@$SERVER_HOST "sudo tar xz -C /opt/pstep/web"
 
-          echo '🚀 启动 web...'
+          echo 'Start web...'
           ssh -o StrictHostKeyChecking=accept-new -i ~/.ssh/deploy_key agentuser@$SERVER_HOST 'sudo systemctl start pstep-web'
 
-          echo '🔍 健康检查...'
+          echo 'Health check...'
           sleep 2
           ssh -o StrictHostKeyChecking=accept-new -i ~/.ssh/deploy_key agentuser@$SERVER_HOST '
             echo "=== Web Status ==="
@@ -101,4 +97,4 @@ jobs:
             echo ""
           '
 
-          echo '✅ Web UI 部署完成!'
+          echo 'Web UI deploy complete!'
