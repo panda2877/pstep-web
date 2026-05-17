@@ -350,7 +350,7 @@ const renderApp = () => {
         </div>
       </div>
       <!-- Chat Panel -->
-      ${chatPanel}
+      <div style="flex:1;min-height:0;overflow:hidden;display:flex;">${chatPanel}</div>
     </div>`;
   render(appHtml, app);
 };
