@@ -148,7 +148,7 @@ let gatewayModels: any[] = [];
 
 async function registerDefaultProvider() {
   const res = await fetch(`${gatewayUrl}/api/models`, {
-    headers: { Authorization: Bearer pstep-gateway-key },
+    headers: { Authorization: "Bearer pstep-gateway-key" },
   });
   const meta = await res.json();
   gatewayModels = meta.models || [];
