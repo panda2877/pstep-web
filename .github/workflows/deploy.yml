@@ -31,7 +31,8 @@ jobs:
   deploy:
     name: Build & Deploy Web UI
     runs-on: ubuntu-latest
-
+    
+    # 禁用缓存避免旧缓存导致的问题
     steps:
       - name: 🔨 Checkout
         uses: actions/checkout@v6
@@ -40,9 +41,25 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: '20'
+          # 禁用缓存，强制重新安装
+          cache: false
 
       - name: 📦 Install dependencies
-        run: npm install
+        run: |
+          rm -rf node_modules package-lock.json
+          npm install
+
+      - name: ✅ Verify vite installed
+        run: |
+          echo "Checking vite installation..."
+          if [ -f "node_modules/.bin/vite" ]; then
+            echo "✓ vite found at node_modules/.bin/vite"
+            ./node_modules/.bin/vite --version
+          else
+            echo "✗ vite NOT found!"
+            ls -la node_modules/.bin/ 2>/dev/null || echo "node_modules/.bin does not exist"
+            exit 1
+          fi
 
       - name: 🏗️ Build
         run: npm run build
