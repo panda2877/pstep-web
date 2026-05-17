@@ -40,6 +40,7 @@ app.use('/gateway', gatewayProxy);
 // Engine proxy
 const engineProxy = createProxyMiddleware({
   target: ENGINE_URL,
+  pathRewrite: { "^/api": "" },
   changeOrigin: true,
   onError: (err, req, res) => {
     console.error("[proxy] Engine 连接失败:", err.message);
