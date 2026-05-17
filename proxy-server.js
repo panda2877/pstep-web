@@ -44,12 +44,7 @@ app.use('/gateway', gatewayProxy);
 const distPath = path.resolve('/opt/pstep/web/dist');
 app.use(express.static(distPath, {
   index: 'index.html',
-  setHeaders: (res) => {
-    // 防止缓存旧 JS
-    if (req.path.endsWith('.js')) {
-      res.setHeader('Cache-Control', 'no-cache');
-    }
-  },
+  maxAge: 0,
 }));
 
 // SPA 回退：所有未匹配路由返回 index.html
