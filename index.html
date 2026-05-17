@@ -8,11 +8,9 @@
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { height: 100%; overflow: hidden; }
     #app { width: 100%; height: 100vh; display: flex; flex-direction: column; }
-    pi-chat-panel { display: flex !important; flex-direction: column !important; width: 100% !important; height: 100% !important; min-height: 0 !important; }
-    /* Force ChatPanel outer div to column layout */
-    pi-chat-panel > div { display: flex !important; flex-direction: column !important; width: 100% !important; height: 100% !important; }
-    /* First child div (wraps agent-interface) takes all available space */
-    pi-chat-panel > div > div:first-child { flex: 1 !important; min-height: 0 !important; height: auto !important; }
+    pi-chat-panel { display: flex !important; flex-direction: column !important; width: 100% !important; flex: 1 !important; min-height: 0 !important; }
+    pi-chat-panel > div { display: flex !important; flex-direction: column !important; width: 100% !important; flex: 1 !important; }
+    pi-chat-panel > div > div:first-child { flex: 1 !important; min-height: 0 !important; }
   </style>
 </head>
 <body>
